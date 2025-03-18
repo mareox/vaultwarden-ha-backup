@@ -1,4 +1,4 @@
-# Vaultwarden Backup System
+# Vaultwarden Backup System (vw-bk-script.sh)
 
 This system provides automated backup functionality for a Vaultwarden Docker container and its SQLite database.
 
@@ -160,3 +160,145 @@ If you encounter issues:
 - Bash shell
 - Standard Linux utilities (`ping`, `logger`)
 - Appropriate permissions to write to log files and execute the backup script
+
+# Vaultwarden SQLite Database Backup Tool
+
+A bash script for automating backups of Vaultwarden SQLite databases.
+
+## Overview
+
+`sq-db-backup.sh` is a utility script designed to create and manage automated backups of a Vaultwarden (self-hosted Bitwarden) SQLite database. This script handles backup rotation, compression, and can be easily integrated with cron for scheduled execution.
+
+## Features
+
+- Creates timestamped SQLite database backups
+- Compresses backups to save storage space
+- Implements backup rotation to manage storage usage
+- Supports optional encryption of backups
+- Includes logging for monitoring backup operations
+- Configurable retention policies
+
+## Prerequisites
+
+- Bash shell environment
+- SQLite3 command-line tools
+- A running Vaultwarden instance with SQLite database
+- (Optional) GPG for backup encryption
+
+## Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/mareox/vaultwarden-tools.git
+   cd vaultwarden-tools
+   ```
+
+2. Make the script executable:
+   ```bash
+   chmod +x sq-db-backup.sh
+   ```
+
+## Configuration
+
+Before using the script, edit the configuration variables at the top of the file:
+
+```bash
+# Database path
+DB_PATH="/path/to/vaultwarden/db.sqlite3"
+
+# Backup directory
+BACKUP_DIR="/path/to/backup/directory"
+
+# Number of backups to retain
+BACKUP_RETENTION=7
+
+# Logging options
+LOG_FILE="/path/to/backup.log"
+ENABLE_LOGGING=true
+```
+
+## Usage
+
+### Manual Execution
+
+Run the script manually:
+
+```bash
+./sq-db-backup.sh
+```
+
+### Scheduled Backups with Cron
+
+Set up a daily backup schedule using cron:
+
+1. Edit your crontab:
+   ```bash
+   crontab -e
+   ```
+
+2. Add a line to run the backup script daily (e.g., at 2:00 AM):
+   ```
+   0 2 * * * /path/to/sq-db-backup.sh
+   ```
+
+## Backup Files
+
+Backups are created with the following naming convention:
+
+```
+vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3.gz
+```
+
+## Restore Procedure
+
+To restore from a backup:
+
+1. Decompress the backup file:
+   ```bash
+   gunzip vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3.gz
+   ```
+
+2. Stop the Vaultwarden service:
+   ```bash
+   systemctl stop vaultwarden
+   ```
+
+3. Replace the existing database with the backup:
+   ```bash
+   cp vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3 /path/to/vaultwarden/db.sqlite3
+   ```
+
+4. Set proper permissions:
+   ```bash
+   chown vaultwarden:vaultwarden /path/to/vaultwarden/db.sqlite3
+   ```
+
+5. Restart Vaultwarden:
+   ```bash
+   systemctl start vaultwarden
+   ```
+
+## Troubleshooting
+
+- Check the log file for error messages
+- Ensure the script has permission to access the database file
+- Verify the backup directory exists and is writable
+
+## Security Considerations
+
+- Store backups in a secure location
+- Consider enabling backup encryption if sensitive data is stored
+- Regularly test the restore procedure
+
+## License
+
+This project is licensed under the MIT License - see the repository for details.
+
+## Acknowledgments
+
+- Vaultwarden project: https://github.com/dani-garcia/vaultwarden
+- Contributors to the vaultwarden-tools repository
+
+## Support
+
+For issues, questions, or contributions, please open an issue on the [GitHub repository](https://github.com/mareox/vaultwarden-tools).
