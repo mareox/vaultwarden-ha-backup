@@ -18,7 +18,7 @@ MONITOR_SCRIPT="${SCRIPTS_DIR}/vault-pri-monitor.sh"
 SYSTEMD_SERVICE="/etc/systemd/system/vault-monitor.service"
 
 # Log file
-LOG_FILE="/tmp/vaultwarden-setup.log"
+LOG_FILE="./vaultwarden-setup.log"
 
 # Function for logging
 log() {
@@ -108,10 +108,59 @@ install_scripts() {
     # Create scripts directory
     create_directory "$SCRIPTS_DIR" || return 1
     
-    # Copy scripts to the directory
-    cp "$(dirname "$0")/vw-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
-    cp "$(dirname "$0")/sq-db-backup.sh" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
-    cp "$(dirname "$0")/vault-pri-monitor.sh" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
+    # Get the directory where this script is located
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+    
+    # List the actual script files that exist in the directory
+    log "Looking for scripts in: $SCRIPT_DIR" "INFO"
+    ls -la "$SCRIPT_DIR"/*.sh 2>/dev/null || log "No .sh files found in the script directory" "WARNING"
+    
+    # Check for each expected script and copy it if it exists
+    if [ -f "$SCRIPT_DIR/vw-bk-script-primary.sh" ]; then
+        cp "$SCRIPT_DIR/vw-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
+    elif [ -f "$SCRIPT_DIR/vault-bk-script-primary.sh" ]; then
+        cp "$SCRIPT_DIR/vault-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
+    else
+        log "Primary backup script not found. Checking for any similar files..." "WARNING"
+        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*bk*script*.sh" -type f | head -1)
+        if [ -n "$FOUND_SCRIPT" ]; then
+            log "Found potential primary script: $FOUND_SCRIPT" "INFO"
+            cp "$FOUND_SCRIPT" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
+        else
+            log "Could not find any primary backup script" "ERROR"
+            return 1
+        fi
+    fi
+    
+    # Do the same for backup script
+    if [ -f "$SCRIPT_DIR/sq-db-backup.sh" ]; then
+        cp "$SCRIPT_DIR/sq-db-backup.sh" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
+    else
+        log "Database backup script not found. Checking for any similar files..." "WARNING"
+        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*db*backup*.sh" -type f | head -1)
+        if [ -n "$FOUND_SCRIPT" ]; then
+            log "Found potential database script: $FOUND_SCRIPT" "INFO"
+            cp "$FOUND_SCRIPT" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
+        else
+            log "Could not find any database backup script" "ERROR"
+            return 1
+        fi
+    fi
+    
+    # Do the same for monitor script
+    if [ -f "$SCRIPT_DIR/vault-pri-monitor.sh" ]; then
+        cp "$SCRIPT_DIR/vault-pri-monitor.sh" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
+    else
+        log "Monitor script not found. Checking for any similar files..." "WARNING"
+        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*monitor*.sh" -type f | head -1)
+        if [ -n "$FOUND_SCRIPT" ]; then
+            log "Found potential monitor script: $FOUND_SCRIPT" "INFO"
+            cp "$FOUND_SCRIPT" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
+        else
+            log "Could not find any monitor script" "ERROR"
+            return 1
+        fi
+    fi
     
     # Set executable permissions
     chmod 700 "$PRIMARY_SCRIPT" || { log "Failed to set permissions on primary script" "ERROR"; return 1; }
@@ -277,6 +326,46 @@ show_summary() {
     echo
 }
 
+# Function to check for required script files
+check_script_files() {
+    log "Checking for required script files in the current directory..." "INFO"
+    
+    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+    log "Script directory is: $SCRIPT_DIR" "INFO"
+    
+    # List all script files
+    SCRIPT_FILES=$(find "$SCRIPT_DIR" -name "*.sh" -type f | sort)
+    if [ -z "$SCRIPT_FILES" ]; then
+        log "No script files found in $SCRIPT_DIR" "ERROR"
+        log "Please make sure you are running this script from the directory containing all the required scripts" "ERROR"
+        return 1
+    fi
+    
+    log "Found the following script files:" "INFO"
+    for file in $SCRIPT_FILES; do
+        log "- $(basename "$file")" "INFO"
+    done
+    
+    # Check for each required script type
+    if ! find "$SCRIPT_DIR" -name "*bk*script*.sh" -o -name "*backup*.sh" -type f | grep -q .; then
+        log "Missing backup script file" "ERROR"
+        return 1
+    fi
+    
+    if ! find "$SCRIPT_DIR" -name "*db*.sh" -o -name "*sqlite*.sh" -type f | grep -q .; then
+        log "Missing database script file" "ERROR"
+        return 1
+    fi
+    
+    if ! find "$SCRIPT_DIR" -name "*monitor*.sh" -type f | grep -q .; then
+        log "Missing monitor script file" "ERROR"
+        return 1
+    fi
+    
+    log "All required script types found" "SUCCESS"
+    return 0
+}
+
 # Main function
 main() {
     # Clear log file
@@ -290,6 +379,20 @@ main() {
     
     # Check if running as root
     check_root
+    
+    # Check for required script files
+    check_script_files || {
+        log "Setup aborted: Required script files are missing" "ERROR"
+        echo
+        echo "Please ensure all required script files are in the same directory as this setup script."
+        echo "Required files should include:"
+        echo "- Backup script (e.g., vw-bk-script-primary.sh or similar)"
+        echo "- Database script (e.g., sq-db-backup.sh or similar)"
+        echo "- Monitor script (e.g., vault-pri-monitor.sh or similar)"
+        echo "- Keepalived setup script (e.g., keepalived-setup.sh) (optional)"
+        echo
+        exit 1
+    }
     
     # Check prerequisites
     check_docker || exit 1
