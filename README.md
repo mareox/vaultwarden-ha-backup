@@ -1,328 +1,366 @@
-## High Availability Setup
-
-The Keepalived setup provides high availability for your Vaultwarden instance through the following mechanism:
-
-1. Two servers are configured: one as MASTER (priority 100) and one as BACKUP (priority 150).
-2. Both servers run the Vaultwarden container independently.
-3. A virtual IP address is shared between them, which automatically moves to the active server.
-4. If the MASTER server fails, the BACKUP server takes over the virtual IP address.
-5. Clients connect to the virtual IP address, so the failover is transparent to them.
-
-### Prerequisites for High Availability
-
-1. Two servers with Vaultwarden installed.
-2. Network infrastructure that allows for a shared virtual IP.
-3. Both servers must be able to communicate with each other.
-
-### Keepalived Configuration
-
-The `keepalived-setup.sh` script automates the configuration of Keepalived with:
-
-- Health check script to monitor the local system
-- Notification script for state transitions
-- Virtual IP configuration
-- Authentication between nodes
-
-### Testing Failover
-
-To test that high availability is working properly:
-
-1. Verify that the virtual IP is active on the MASTER node:
-   ```bash
-   ip addr show
-   ```
-
-2. Simulate a failure by stopping Keepalived on the MASTER node:
-   ```bash
-   sudo systemctl stop keepalived
-   ```
-
-3. Verify that the virtual IP has moved to the BACKUP node:
-   ```bash
-   # On the BACKUP node
-   ip addr show
-   ```
-
-4. Restart Keepalived on the MASTER node:
-   ```bash
-   sudo systemctl start keepalived
-   ```
-
-5. Verify that the virtual IP moves back to the MASTER node (after a brief delay).## System Architecture
-
-The Vaultwarden Management System can be deployed in different configurations:
-
-### Single Server Deployment
-- A single server running Vaultwarden with backup and monitoring capabilities.
-
-### High Availability Deployment
-- **PRIMARY Server**: Runs Vaultwarden with scheduled backups and monitoring.
-- **BACKUP Server**: Standby server that takes over if the PRIMARY fails.
-- **Virtual IP**: Floating IP address that automatically follows the active server.
-
-With the high availability setup, if the PRIMARY server fails, the BACKUP server automatically takes over the Virtual IP and continues to serve the Vaultwarden application with minimal downtime.# Vaultwarden Management System
-
-This system provides automated backup, monitoring, and high availability functionality for a Vaultwarden Docker container and its SQLite database.
-
-## Components
-
-The system consists of the following scripts:
-
-1. **vw-bk-script-primary.sh**: Main backup controller script that:
-   - Stops the Vaultwarden Docker container
-   - Executes the database backup script
-   - Restarts the container
-   - Handles errors and container restart failures
-   - Reboots the host system if container restart fails repeatedly
-
-2. **sq-db-backup.sh**: Database backup script that:
-   - Creates backups of the SQLite database
-   - Maintains a rotating set of backups (keeping the most recent 30)
-   - Cleans up older backups automatically
-
-3. **vault-pri-monitor.sh**: Heartbeat monitoring script that:
-   - Periodically checks if the vault server is responding
-   - Logs the status of the checks
-   - Triggers the backup script after consecutive failures
-   - Provides syslog integration for alerting
-
-4. **keepalived-setup.sh**: High availability setup script that:
-   - Configures Keepalived for automatic failover between PRIMARY and BACKUP servers
-   - Sets up virtual IP functionality
-   - Creates health check and notification scripts
-   - Provides a simple way to create a highly available Vaultwarden deployment
-
-## Installation
-
-### Automated Setup (Recommended)
-
-The easiest way to install the system is to use the provided setup script:
-
-1. Download all the scripts to a temporary location:
-   ```bash
-   git clone https://github.com/mareox/vaultwarden-tools.git
-   cd vaultwarden-tools
-   ```
-
-2. Run the setup script as root:
-   ```bash
-   sudo ./vaultwarden-setup.sh
-   ```
-
-3. Follow the interactive prompts to choose between:
-   - **PRIMARY server**: Configured with scheduled backups at 3:00 AM and 5:00 PM daily.
-   - **SECONDARY server**: No scheduled backups, only monitor-triggered backups.
-
-4. The script will also ask if you want to configure Keepalived for high availability:
-   - If you select yes, it will run the Keepalived setup script
-   - You'll be prompted to choose MASTER or BACKUP role
-   - You'll need to provide the local IP, peer IP, virtual IP, and authentication password
-
-The setup script will:
-- Verify Docker and the Vaultwarden container are installed
-- Install all scripts to `/etc/scripts/`
-- Set appropriate permissions
-- Configure cron jobs (for PRIMARY servers)
-- Set up and start the monitor service
-- Create required directories
-- Optionally set up Keepalived for high availability
-- Provide a summary of the installation
-
-### Manual Installation
-
-If you prefer to install manually, follow these steps:
-
-1. Place all scripts in the `/etc/scripts/` directory:
-   ```bash
-   sudo cp vw-bk-script-primary.sh /etc/scripts/
-   sudo cp sq-db-backup.sh /etc/scripts/
-   sudo cp vault-pri-monitor.sh /etc/scripts/
-   sudo cp keepalived-setup.sh /etc/scripts/  # Optional for high availability
-   ```
-
-2. Set proper permissions:
-   ```bash
-   sudo chmod 700 /etc/scripts/vw-bk-script-primary.sh
-   sudo chmod 700 /etc/scripts/sq-db-backup.sh
-   sudo chmod 700 /etc/scripts/vault-pri-monitor.sh
-   sudo chmod 700 /etc/scripts/keepalived-setup.sh  # Optional for high availability
-   ```
-
-3. Create the backup directory:
-   ```bash
-   sudo mkdir -p /mx-server/backups/BK_vaultwarden
-   ```
-
-4. Set up cron jobs (PRIMARY server only):
-   ```bash
-   (crontab -l 2>/dev/null; echo "0 3 * * * /etc/scripts/vw-bk-script-primary.sh") | crontab -
-   (crontab -l 2>/dev/null; echo "0 17 * * * /etc/scripts/vw-bk-script-primary.sh") | crontab -
-   ```
-
-5. Create and configure the monitor service:
-   ```bash
-   sudo nano /etc/systemd/system/vault-monitor.service
-   # Add the service configuration as shown in the Execution section
-   sudo systemctl daemon-reload
-   sudo systemctl enable vault-monitor
-   sudo systemctl start vault-monitor
-   ```
-
-6. (Optional) Set up Keepalived for high availability:
-   ```bash
-   sudo /etc/scripts/keepalived-setup.sh
-   # Follow the prompts to configure Keepalived
-   ```
-
-## Execution
-
-### Backup Script
-
-The backup script can be run manually:
-```bash
-sudo /etc/scripts/vw-bk-script-primary.sh
-```
-
-For PRIMARY servers, backups are scheduled at 3:00 AM and 5:00 PM daily via cron.
-
-### Monitor Script
-
-The monitoring script runs as a systemd service, which is configured automatically by the setup script.
-
-To manually manage the service:
-
-```bash
-# Check status
-sudo systemctl status vault-monitor
-
-# Stop service
-sudo systemctl stop vault-monitor
-
-# Start service
-sudo systemctl start vault-monitor
-
-# Restart service
-sudo systemctl restart vault-monitor
-
-# View logs
-sudo journalctl -u vault-monitor
-```
-
-### Keepalived (High Availability)
-
-If you've set up Keepalived for high availability, you can manage it with:
-
-```bash
-# Check status
-sudo systemctl status keepalived
-
-# Stop service
-sudo systemctl stop keepalived
-
-# Start service
-sudo systemctl start keepalived
-
-# Restart service
-sudo systemctl restart keepalived
-
-# View logs
-sudo journalctl -u keepalived
-```
-
-To check which node is currently the MASTER (active node):
-```bash
-ip addr show
-```
-Look for the virtual IP address in the output.
-
-## Logs
-
-### Backup Logs
-Backup logs are saved to:
-```
-/etc/scripts/sq-db-backup.sh.log
-```
-
-### Monitor Logs
-Monitor logs are saved to:
-```
-/var/log/vault-monitor.log
-```
-
-Additionally, the monitoring script sends log messages to syslog with different priority levels based on the severity of events.
-
-### Keepalived Logs
-Keepalived logs are sent to the system journal:
-```
-sudo journalctl -u keepalived
-```
-
-Review these files to check for backup successes or failures, monitor status, and Keepalived state changes.
-
-## Sudoers Configuration (Optional)
-
-To allow a specific user to run the scripts with sudo without a password prompt:
-
-1. Edit the sudoers file:
-   ```bash
-   sudo visudo -f /etc/sudoers.d/vw-backup
-   ```
-
-2. Add the following lines (replace "username" with your actual username):
-   ```
-   username ALL=(ALL) NOPASSWD: /etc/scripts/vw-bk-script-primary.sh
-   username ALL=(ALL) NOPASSWD: /etc/scripts/vault-pri-monitor.sh
-   ```
-
-## Backup Storage
-
-Backups are stored in:
-```
-/mx-server/backups/BK_vaultwarden/
-```
-
-The system maintains the most recent 30 backups and automatically removes older ones.
-
-## System Integration
-
-This is how the different scripts work together:
-
-1. **Scheduled Backups**: The `vw-bk-script-primary.sh` performs regular scheduled backups via cron on the PRIMARY server.
-
-2. **Automated Monitoring**: The `vault-pri-monitor.sh` continuously monitors the vault server's availability on both PRIMARY and SECONDARY servers.
-
-3. **Failure Response**: If the monitor detects that the vault server is down after several consecutive checks, it automatically runs the backup script to preserve data.
-
-4. **Database Backup Logic**: Both scripts utilize the core `sq-db-backup.sh` to perform the actual SQLite database backup operations.
-
-5. **High Availability**: The `keepalived` service manages the virtual IP address, automatically moving it to the healthy server if the active one fails.
-
-This integrated approach provides:
-- Proactive scheduled backups
-- Reactive backups in response to detected failures
-- Automatic failover between servers
-- Minimized downtime for end users
-
-## Configuration
-
-### Monitor Script Configuration
-
-The monitor script has several configurable parameters at the top of the file:
-
-```bash
-# Configuration
-HOSTNAME="vault"             # Hostname to monitor
-CHECK_INTERVAL=14400         # 4 hours in seconds
-PING_DURATION=10             # Duration to ping in seconds
-MAX_RETRIES=3                # Max retries per check
-FAILURE_THRESHOLD=3          # Number of consecutive failures before marked down
-BACKUP_SCRIPT="/etc/scripts/sq-db-backup.sh"  # Path to backup script
-```
-
-You may adjust these values to match your specific needs, such as changing the check interval or failure threshold.
-
-## Warnings
-
-- **Reboot Function**: The backup script includes functionality to reboot the host system if the Vaultwarden container fails to restart after multiple attempts. Use with caution in production environments.
-
-- **Resource Usage**: The monitor script runs continuously and performs periodic ping checks. While the resource usage is minimal, be aware that it's constantly running on your system.
+#!/bin/bash
+#
+# vaultwarden-setup.sh - Interactive setup script for Vaultwarden management system
+#
+
+# Colors for better output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Define script paths
+SCRIPTS_DIR="/etc/scripts"
+PRIMARY_SCRIPT="${SCRIPTS_DIR}/vw-bk-script-primary.sh"
+BACKUP_SCRIPT="${SCRIPTS_DIR}/sq-db-backup.sh"
+MONITOR_SCRIPT="${SCRIPTS_DIR}/vault-pri-monitor.sh"
+SYSTEMD_SERVICE="/etc/systemd/system/vault-monitor.service"
+
+# Log file
+LOG_FILE="/tmp/vaultwarden-setup.log"
+
+# Function for logging
+log() {
+    local message="$1"
+    local level="$2"
+    local color="${NC}"
+    
+    # Set color based on level
+    case "$level" in
+        "ERROR")
+            color="${RED}"
+            ;;
+        "SUCCESS")
+            color="${GREEN}"
+            ;;
+        "WARNING")
+            color="${YELLOW}"
+            ;;
+        "INFO")
+            color="${BLUE}"
+            ;;
+    esac
+    
+    # Print to console with color
+    echo -e "${color}[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message${NC}"
+    
+    # Log to file without color codes
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" >> "$LOG_FILE"
+}
+
+# Function to check if running as root
+check_root() {
+    if [ "$(id -u)" -ne 0 ]; then
+        log "This script must be run as root" "ERROR"
+        exit 1
+    fi
+}
+
+# Function to create directory if it doesn't exist
+create_directory() {
+    local dir="$1"
+    if [ ! -d "$dir" ]; then
+        log "Creating directory: $dir" "INFO"
+        mkdir -p "$dir" || { log "Failed to create directory: $dir" "ERROR"; return 1; }
+    else
+        log "Directory already exists: $dir" "INFO"
+    fi
+    return 0
+}
+
+# Function to check if Docker is installed
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        log "Docker is not installed. Please install Docker first." "ERROR"
+        return 1
+    fi
+    
+    # Check if docker is running
+    if ! docker info &> /dev/null; then
+        log "Docker daemon is not running. Please start Docker service." "ERROR"
+        return 1
+    fi
+    
+    log "Docker is installed and running" "SUCCESS"
+    return 0
+}
+
+# Function to check if vaultwarden container exists
+check_vaultwarden() {
+    if ! docker ps -a | grep -q "vaultwarden"; then
+        log "Vaultwarden container not found. Please ensure the container is named 'vaultwarden'." "WARNING"
+        read -p "Continue anyway? (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 1
+        fi
+    else
+        log "Vaultwarden container found" "SUCCESS"
+    fi
+    return 0
+}
+
+# Function to install the scripts
+install_scripts() {
+    log "Installing scripts to $SCRIPTS_DIR" "INFO"
+    
+    # Create scripts directory
+    create_directory "$SCRIPTS_DIR" || return 1
+    
+    # Copy scripts to the directory
+    cp "$(dirname "$0")/vw-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
+    cp "$(dirname "$0")/sq-db-backup.sh" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
+    cp "$(dirname "$0")/vault-pri-monitor.sh" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
+    
+    # Set executable permissions
+    chmod 700 "$PRIMARY_SCRIPT" || { log "Failed to set permissions on primary script" "ERROR"; return 1; }
+    chmod 700 "$BACKUP_SCRIPT" || { log "Failed to set permissions on backup script" "ERROR"; return 1; }
+    chmod 700 "$MONITOR_SCRIPT" || { log "Failed to set permissions on monitor script" "ERROR"; return 1; }
+    
+    log "Scripts installed successfully" "SUCCESS"
+    return 0
+}
+
+# Function to create backup directory
+setup_backup_dir() {
+    local backup_dir="/mx-server/backups/BK_vaultwarden"
+    create_directory "$backup_dir" || return 1
+    log "Backup directory created/verified: $backup_dir" "SUCCESS"
+    return 0
+}
+
+# Function to set up primary server configuration
+setup_primary() {
+    log "Setting up PRIMARY server configuration" "INFO"
+    
+    # Create cron jobs for scheduled backups
+    log "Setting up cron jobs for 3:00 AM and 5:00 PM" "INFO"
+    (crontab -l 2>/dev/null | grep -v "$PRIMARY_SCRIPT"; echo "0 3 * * * $PRIMARY_SCRIPT") | crontab -
+    (crontab -l 2>/dev/null | grep -v "$PRIMARY_SCRIPT"; echo "0 17 * * * $PRIMARY_SCRIPT") | crontab -
+    
+    if [ $? -ne 0 ]; then
+        log "Failed to set up cron jobs" "ERROR"
+        return 1
+    fi
+    
+    log "Cron jobs set up successfully" "SUCCESS"
+    
+    # Set up monitor service
+    setup_monitor_service || return 1
+    
+    log "PRIMARY server setup completed successfully" "SUCCESS"
+    return 0
+}
+
+# Function to set up secondary server configuration
+setup_secondary() {
+    log "Setting up SECONDARY server configuration" "INFO"
+    
+    # Set up monitor service only (no scheduled backups)
+    setup_monitor_service || return 1
+    
+    log "SECONDARY server setup completed successfully" "SUCCESS"
+    return 0
+}
+
+# Function to set up the monitor service
+setup_monitor_service() {
+    log "Setting up monitor service" "INFO"
+    
+    # Create systemd service file
+    cat > "$SYSTEMD_SERVICE" << EOF
+[Unit]
+Description=Vaultwarden Server Monitor
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$MONITOR_SCRIPT
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    if [ $? -ne 0 ]; then
+        log "Failed to create systemd service file" "ERROR"
+        return 1
+    fi
+    
+    # Reload systemd, enable and start the service
+    systemctl daemon-reload || { log "Failed to reload systemd" "ERROR"; return 1; }
+    systemctl enable vault-monitor || { log "Failed to enable vault-monitor service" "ERROR"; return 1; }
+    systemctl start vault-monitor || { log "Failed to start vault-monitor service" "ERROR"; return 1; }
+    
+    # Check if service is running
+    if systemctl is-active --quiet vault-monitor; then
+        log "Monitor service is running" "SUCCESS"
+    else
+        log "Monitor service failed to start" "ERROR"
+        return 1
+    fi
+    
+    return 0
+}
+
+# Function to check if keepalived is installed
+check_keepalived() {
+    if command -v keepalived &> /dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to setup keepalived
+setup_keepalived() {
+    log "Setting up Keepalived" "INFO"
+    
+    # Check if keepalived-setup.sh exists in the current directory
+    if [ -f "$(dirname "$0")/keepalived-setup.sh" ]; then
+        # Make it executable
+        chmod +x "$(dirname "$0")/keepalived-setup.sh"
+        
+        # Run the script
+        "$(dirname "$0")/keepalived-setup.sh"
+        
+        if [ $? -eq 0 ]; then
+            log "Keepalived setup completed successfully" "SUCCESS"
+            return 0
+        else
+            log "Keepalived setup failed" "ERROR"
+            return 1
+        fi
+    else
+        log "Keepalived setup script not found in the current directory" "ERROR"
+        log "Please download it from: https://github.com/mareox/vaultwarden-ha-backup" "INFO"
+        return 1
+    fi
+}
+
+# Function to display summary
+show_summary() {
+    local server_type="$1"
+    local keepalived_installed="$2"
+    
+    echo
+    log "=== INSTALLATION SUMMARY ===" "INFO"
+    log "Server type: $server_type" "INFO"
+    log "Scripts installed in: $SCRIPTS_DIR" "INFO"
+    log "Log file: $LOG_FILE" "INFO"
+    
+    if [ "$server_type" = "PRIMARY" ]; then
+        log "Scheduled backups: 3:00 AM and 5:00 PM daily" "INFO"
+    else
+        log "No scheduled backups (triggered by monitor only)" "INFO"
+    fi
+    
+    log "Monitor service: Enabled and running" "INFO"
+    log "Monitor service status: $(systemctl is-active vault-monitor)" "INFO"
+    
+    if [ "$keepalived_installed" = "true" ]; then
+        log "Keepalived: Installed and configured" "INFO"
+        log "Keepalived service status: $(systemctl is-active keepalived)" "INFO"
+    else
+        log "Keepalived: Not installed" "INFO"
+    fi
+    
+    echo
+    log "To check monitor logs: sudo journalctl -u vault-monitor" "INFO"
+    log "To check backup logs: cat /etc/scripts/sq-db-backup.sh.log" "INFO"
+    if [ "$keepalived_installed" = "true" ]; then
+        log "To check keepalived logs: sudo journalctl -u keepalived" "INFO"
+    fi
+    echo
+}
+
+# Main function
+main() {
+    # Clear log file
+    > "$LOG_FILE"
+    
+    echo "===================================================="
+    echo "    Vaultwarden Management System Setup Script      "
+    echo "===================================================="
+    echo
+    log "Starting setup script" "INFO"
+    
+    # Check if running as root
+    check_root
+    
+    # Check prerequisites
+    check_docker || exit 1
+    check_vaultwarden || exit 1
+    
+    # Prompt for server type
+    echo
+    echo "Please select the server type to configure:"
+    echo "1) PRIMARY server (scheduled backups at 3:00 AM and 5:00 PM)"
+    echo "2) SECONDARY server (backups triggered by monitor only)"
+    echo
+    
+    read -p "Enter your choice (1 or 2): " server_choice
+    echo
+    
+    # Validate choice
+    if [ "$server_choice" != "1" ] && [ "$server_choice" != "2" ]; then
+        log "Invalid choice. Please select 1 or 2." "ERROR"
+        exit 1
+    fi
+    
+    # Install scripts
+    install_scripts || exit 1
+    
+    # Set up backup directory
+    setup_backup_dir || exit 1
+    
+    # Configure based on choice
+    if [ "$server_choice" = "1" ]; then
+        setup_primary || exit 1
+        SELECTED_SERVER_TYPE="PRIMARY"
+    else
+        setup_secondary || exit 1
+        SELECTED_SERVER_TYPE="SECONDARY"
+    fi
+    
+    # Check if keepalived is already installed
+    KEEPALIVED_INSTALLED="false"
+    if check_keepalived; then
+        log "Keepalived is already installed on this system" "INFO"
+        read -p "Would you like to reconfigure Keepalived? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            setup_keepalived
+            if [ $? -eq 0 ]; then
+                KEEPALIVED_INSTALLED="true"
+            fi
+        else
+            KEEPALIVED_INSTALLED="true"
+        fi
+    else
+        # Ask if user wants to install keepalived
+        read -p "Would you like to install and configure Keepalived for high availability? (y/n): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            setup_keepalived
+            if [ $? -eq 0 ]; then
+                KEEPALIVED_INSTALLED="true"
+            fi
+        fi
+    fi
+    
+    # Show installation summary
+    show_summary "$SELECTED_SERVER_TYPE" "$KEEPALIVED_INSTALLED"
+    
+    log "Setup completed successfully!" "SUCCESS"
+    echo
+    echo "For more information, refer to the README.md file."
+    echo "If you encounter any issues, please check the log file: $LOG_FILE"
+    echo
+}
+
+# Run the main function
+main
