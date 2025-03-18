@@ -161,7 +161,7 @@ If you encounter issues:
 - Standard Linux utilities (`ping`, `logger`)
 - Appropriate permissions to write to log files and execute the backup script
 
-# Vaultwarden SQLite Database Backup Tool
+# Vaultwarden SQLite Database Backup Tool (sq-db-backup.sh)
 
 A bash script for automating backups of Vaultwarden SQLite databases.
 
