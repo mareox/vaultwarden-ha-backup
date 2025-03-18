@@ -1,4 +1,28 @@
-#!/bin/bash
+# Function to download scripts for remote installation
+download_scripts() {
+    local base_url="https://raw.githubusercontent.com/mareox/vaultwarden-ha-backup/refs/heads/main"
+    local temp_dir="$HOME/vaultwarden-temp"
+    
+    log "Remote installation mode detected" "INFO"
+    log "Creating temporary directory: $temp_dir" "INFO"
+    
+    # Create temp directory
+    mkdir -p "$temp_dir" || { log "Failed to create temporary directory" "ERROR"; return 1; }
+    
+    # Download required scripts
+    log "Downloading scripts from GitHub..." "INFO"
+    
+    curl -s "$base_url/vw-bk-script-primary.sh" -o "$temp_dir/vw-bk-script-primary.sh" || { log "Failed to download primary script" "ERROR"; return 1; }
+    curl -s "$base_url/sq-db-backup.sh" -o "$temp_dir/sq-db-backup.sh" || { log "Failed to download backup script" "ERROR"; return 1; }
+    curl -s "$base_url/vault-pri-monitor.sh" -o "$temp_dir/vault-pri-monitor.sh" || { log "Failed to download monitor script" "ERROR"; return 1; }
+    curl -s "$base_url/keepalived-setup.sh" -o "$temp_dir/keepalived-setup.sh" || { log "Failed to download keepalived setup script" "WARNING"; }
+    
+    # Set script directory to the temporary directory
+    SCRIPT_DIR="$temp_dir"
+    
+    log "Scripts downloaded successfully to $temp_dir" "SUCCESS"
+    return 0
+}#!/bin/bash
 #
 # vaultwarden-setup.sh - Interactive setup script for Vaultwarden management system
 #
@@ -18,7 +42,10 @@ MONITOR_SCRIPT="${SCRIPTS_DIR}/vault-pri-monitor.sh"
 SYSTEMD_SERVICE="/etc/systemd/system/vault-monitor.service"
 
 # Log file
-LOG_FILE="./vaultwarden-setup.log"
+LOG_FILE="$HOME/vaultwarden-setup.log"
+
+# Remote installation mode flag
+REMOTE_INSTALL=false
 
 # Function for logging
 log() {
@@ -108,64 +135,32 @@ install_scripts() {
     # Create scripts directory
     create_directory "$SCRIPTS_DIR" || return 1
     
-    # Get the directory where this script is located
-    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-    
-    # List the actual script files that exist in the directory
-    log "Looking for scripts in: $SCRIPT_DIR" "INFO"
-    ls -la "$SCRIPT_DIR"/*.sh 2>/dev/null || log "No .sh files found in the script directory" "WARNING"
-    
-    # Check for each expected script and copy it if it exists
-    if [ -f "$SCRIPT_DIR/vw-bk-script-primary.sh" ]; then
-        cp "$SCRIPT_DIR/vw-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
-    elif [ -f "$SCRIPT_DIR/vault-bk-script-primary.sh" ]; then
-        cp "$SCRIPT_DIR/vault-bk-script-primary.sh" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
-    else
-        log "Primary backup script not found. Checking for any similar files..." "WARNING"
-        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*bk*script*.sh" -type f | head -1)
-        if [ -n "$FOUND_SCRIPT" ]; then
-            log "Found potential primary script: $FOUND_SCRIPT" "INFO"
-            cp "$FOUND_SCRIPT" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
-        else
-            log "Could not find any primary backup script" "ERROR"
-            return 1
+    # Copy scripts to the directory
+    for SCRIPT_FILE in $(find "$SCRIPT_DIR" -name "*.sh" -type f); do
+        SCRIPT_NAME=$(basename "$SCRIPT_FILE")
+        
+        # Determine the target name based on the script type
+        if [[ "$SCRIPT_NAME" == *"bk"*"script"* || "$SCRIPT_NAME" == *"backup"* ]] && [[ "$SCRIPT_NAME" != *"db"* && "$SCRIPT_NAME" != *"sq"* ]]; then
+            # This is likely the primary backup script
+            cp "$SCRIPT_FILE" "$PRIMARY_SCRIPT" || { log "Failed to copy primary script" "ERROR"; return 1; }
+            log "Installed primary script: $SCRIPT_NAME → $(basename "$PRIMARY_SCRIPT")" "INFO"
+        elif [[ "$SCRIPT_NAME" == *"db"* || "$SCRIPT_NAME" == *"sqlite"* ]]; then
+            # This is likely the database backup script
+            cp "$SCRIPT_FILE" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
+            log "Installed database script: $SCRIPT_NAME → $(basename "$BACKUP_SCRIPT")" "INFO"
+        elif [[ "$SCRIPT_NAME" == *"monitor"* ]]; then
+            # This is likely the monitor script
+            cp "$SCRIPT_FILE" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
+            log "Installed monitor script: $SCRIPT_NAME → $(basename "$MONITOR_SCRIPT")" "INFO"
+        elif [[ "$SCRIPT_NAME" == *"keepalived"* ]]; then
+            # This is likely the keepalived setup script
+            cp "$SCRIPT_FILE" "$SCRIPTS_DIR/keepalived-setup.sh" || { log "Failed to copy keepalived setup script" "WARNING"; }
+            log "Installed keepalived script: $SCRIPT_NAME → keepalived-setup.sh" "INFO"
         fi
-    fi
+    done
     
-    # Do the same for backup script
-    if [ -f "$SCRIPT_DIR/sq-db-backup.sh" ]; then
-        cp "$SCRIPT_DIR/sq-db-backup.sh" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
-    else
-        log "Database backup script not found. Checking for any similar files..." "WARNING"
-        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*db*backup*.sh" -type f | head -1)
-        if [ -n "$FOUND_SCRIPT" ]; then
-            log "Found potential database script: $FOUND_SCRIPT" "INFO"
-            cp "$FOUND_SCRIPT" "$BACKUP_SCRIPT" || { log "Failed to copy backup script" "ERROR"; return 1; }
-        else
-            log "Could not find any database backup script" "ERROR"
-            return 1
-        fi
-    fi
-    
-    # Do the same for monitor script
-    if [ -f "$SCRIPT_DIR/vault-pri-monitor.sh" ]; then
-        cp "$SCRIPT_DIR/vault-pri-monitor.sh" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
-    else
-        log "Monitor script not found. Checking for any similar files..." "WARNING"
-        FOUND_SCRIPT=$(find "$SCRIPT_DIR" -name "*monitor*.sh" -type f | head -1)
-        if [ -n "$FOUND_SCRIPT" ]; then
-            log "Found potential monitor script: $FOUND_SCRIPT" "INFO"
-            cp "$FOUND_SCRIPT" "$MONITOR_SCRIPT" || { log "Failed to copy monitor script" "ERROR"; return 1; }
-        else
-            log "Could not find any monitor script" "ERROR"
-            return 1
-        fi
-    fi
-    
-    # Set executable permissions
-    chmod 700 "$PRIMARY_SCRIPT" || { log "Failed to set permissions on primary script" "ERROR"; return 1; }
-    chmod 700 "$BACKUP_SCRIPT" || { log "Failed to set permissions on backup script" "ERROR"; return 1; }
-    chmod 700 "$MONITOR_SCRIPT" || { log "Failed to set permissions on monitor script" "ERROR"; return 1; }
+    # Set executable permissions on all scripts in the scripts directory
+    chmod 700 "$SCRIPTS_DIR"/*.sh || { log "Failed to set permissions on scripts" "ERROR"; return 1; }
     
     log "Scripts installed successfully" "SUCCESS"
     return 0
@@ -268,13 +263,13 @@ check_keepalived() {
 setup_keepalived() {
     log "Setting up Keepalived" "INFO"
     
-    # Check if keepalived-setup.sh exists in the current directory
-    if [ -f "$(dirname "$0")/keepalived-setup.sh" ]; then
-        # Make it executable
-        chmod +x "$(dirname "$0")/keepalived-setup.sh"
+    # Check if keepalived-setup.sh exists in the scripts directory
+    if [ -f "$SCRIPTS_DIR/keepalived-setup.sh" ]; then
+        # Make it executable (just to be sure)
+        chmod +x "$SCRIPTS_DIR/keepalived-setup.sh"
         
         # Run the script
-        "$(dirname "$0")/keepalived-setup.sh"
+        "$SCRIPTS_DIR/keepalived-setup.sh"
         
         if [ $? -eq 0 ]; then
             log "Keepalived setup completed successfully" "SUCCESS"
@@ -284,7 +279,7 @@ setup_keepalived() {
             return 1
         fi
     else
-        log "Keepalived setup script not found in the current directory" "ERROR"
+        log "Keepalived setup script not found in $SCRIPTS_DIR" "ERROR"
         log "Please download it from: https://github.com/mareox/vaultwarden-ha-backup" "INFO"
         return 1
     fi
@@ -328,13 +323,17 @@ show_summary() {
 
 # Function to check for required script files
 check_script_files() {
-    log "Checking for required script files in the current directory..." "INFO"
+    log "Checking for required script files..." "INFO"
     
-    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
-    log "Script directory is: $SCRIPT_DIR" "INFO"
+    if [ "$REMOTE_INSTALL" = true ]; then
+        download_scripts || return 1
+    else
+        SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+        log "Script directory is: $SCRIPT_DIR" "INFO"
+    fi
     
     # List all script files
-    SCRIPT_FILES=$(find "$SCRIPT_DIR" -name "*.sh" -type f | sort)
+    SCRIPT_FILES=$(find "$SCRIPT_DIR" -name "*.sh" -type f 2>/dev/null | sort)
     if [ -z "$SCRIPT_FILES" ]; then
         log "No script files found in $SCRIPT_DIR" "ERROR"
         log "Please make sure you are running this script from the directory containing all the required scripts" "ERROR"
@@ -347,17 +346,17 @@ check_script_files() {
     done
     
     # Check for each required script type
-    if ! find "$SCRIPT_DIR" -name "*bk*script*.sh" -o -name "*backup*.sh" -type f | grep -q .; then
+    if ! find "$SCRIPT_DIR" -name "*bk*script*.sh" -o -name "*backup*.sh" -type f 2>/dev/null | grep -q .; then
         log "Missing backup script file" "ERROR"
         return 1
     fi
     
-    if ! find "$SCRIPT_DIR" -name "*db*.sh" -o -name "*sqlite*.sh" -type f | grep -q .; then
+    if ! find "$SCRIPT_DIR" -name "*db*.sh" -o -name "*sqlite*.sh" -type f 2>/dev/null | grep -q .; then
         log "Missing database script file" "ERROR"
         return 1
     fi
     
-    if ! find "$SCRIPT_DIR" -name "*monitor*.sh" -type f | grep -q .; then
+    if ! find "$SCRIPT_DIR" -name "*monitor*.sh" -type f 2>/dev/null | grep -q .; then
         log "Missing monitor script file" "ERROR"
         return 1
     fi
