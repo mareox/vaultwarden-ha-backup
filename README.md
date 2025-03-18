@@ -1,14 +1,12 @@
-===============================================================================================================================================================================
-# Vaultwarden Backup System (vw-bk-script.sh)
-===============================================================================================================================================================================
+# Vaultwarden Management System
 
-This system provides automated backup functionality for a Vaultwarden Docker container and its SQLite database.
+This system provides automated backup and monitoring functionality for a Vaultwarden Docker container and its SQLite database.
 
 ## Components
 
-The backup system consists of two main scripts:
+The system consists of three main scripts:
 
-1. **vw-bk-script-primary.sh**: Main controller script that:
+1. **vw-bk-script-primary.sh**: Main backup controller script that:
    - Stops the Vaultwarden Docker container
    - Executes the database backup script
    - Restarts the container
@@ -20,58 +18,145 @@ The backup system consists of two main scripts:
    - Maintains a rotating set of backups (keeping the most recent 30)
    - Cleans up older backups automatically
 
+3. **vault-pri-monitor.sh**: Heartbeat monitoring script that:
+   - Periodically checks if the vault server is responding
+   - Logs the status of the checks
+   - Triggers the backup script after consecutive failures
+   - Provides syslog integration for alerting
+
 ## Installation
 
-1. Place both scripts in the `/etc/scripts/` directory:
+### Automated Setup (Recommended)
+
+The easiest way to install the system is to use the provided setup script:
+
+1. Download all the scripts to a temporary location:
+   ```bash
+   git clone https://github.com/mareox/vaultwarden-tools.git
+   cd vaultwarden-tools
+   ```
+
+2. Run the setup script as root:
+   ```bash
+   sudo ./vaultwarden-setup.sh
+   ```
+
+3. Follow the interactive prompts to choose between:
+   - **PRIMARY server**: Configured with scheduled backups at 3:00 AM and 5:00 PM daily.
+   - **SECONDARY server**: No scheduled backups, only monitor-triggered backups.
+
+The setup script will:
+- Verify Docker and the Vaultwarden container are installed
+- Install all scripts to `/etc/scripts/`
+- Set appropriate permissions
+- Configure cron jobs (for PRIMARY servers)
+- Set up and start the monitor service
+- Create required directories
+- Provide a summary of the installation
+
+### Manual Installation
+
+If you prefer to install manually, follow these steps:
+
+1. Place all scripts in the `/etc/scripts/` directory:
    ```bash
    sudo cp vw-bk-script-primary.sh /etc/scripts/
    sudo cp sq-db-backup.sh /etc/scripts/
+   sudo cp vault-pri-monitor.sh /etc/scripts/
    ```
 
 2. Set proper permissions:
    ```bash
    sudo chmod 700 /etc/scripts/vw-bk-script-primary.sh
    sudo chmod 700 /etc/scripts/sq-db-backup.sh
+   sudo chmod 700 /etc/scripts/vault-pri-monitor.sh
+   ```
+
+3. Create the backup directory:
+   ```bash
+   sudo mkdir -p /mx-server/backups/BK_vaultwarden
+   ```
+
+4. Set up cron jobs (PRIMARY server only):
+   ```bash
+   (crontab -l 2>/dev/null; echo "0 3 * * * /etc/scripts/vw-bk-script-primary.sh") | crontab -
+   (crontab -l 2>/dev/null; echo "0 17 * * * /etc/scripts/vw-bk-script-primary.sh") | crontab -
+   ```
+
+5. Create and configure the monitor service:
+   ```bash
+   sudo nano /etc/systemd/system/vault-monitor.service
+   # Add the service configuration as shown in the Execution section
+   sudo systemctl daemon-reload
+   sudo systemctl enable vault-monitor
+   sudo systemctl start vault-monitor
    ```
 
 ## Execution
 
-The script can be run manually:
+### Backup Script
+
+The backup script can be run manually:
 ```bash
 sudo /etc/scripts/vw-bk-script-primary.sh
 ```
 
-For scheduled execution, add it to root's crontab:
-```bash
-sudo crontab -e
-```
+For PRIMARY servers, backups are scheduled at 3:00 AM and 5:00 PM daily via cron.
 
-Add a line like this to run it daily at 2 AM:
-```
-0 2 * * * /etc/scripts/vw-bk-script-primary.sh
+### Monitor Script
+
+The monitoring script runs as a systemd service, which is configured automatically by the setup script.
+
+To manually manage the service:
+
+```bash
+# Check status
+sudo systemctl status vault-monitor
+
+# Stop service
+sudo systemctl stop vault-monitor
+
+# Start service
+sudo systemctl start vault-monitor
+
+# Restart service
+sudo systemctl restart vault-monitor
+
+# View logs
+sudo journalctl -u vault-monitor
 ```
 
 ## Logs
 
-Logs are saved to:
+### Backup Logs
+Backup logs are saved to:
 ```
 /etc/scripts/sq-db-backup.sh.log
 ```
 
-Review this file to check for backup successes or failures.
+### Monitor Logs
+Monitor logs are saved to:
+```
+/var/log/vault-monitor.log
+```
+
+Additionally, the monitoring script sends log messages to syslog with different priority levels based on the severity of events.
+
+Review these files to check for backup successes or failures and monitor status.
 
 ## Sudoers Configuration (Optional)
 
-To allow a specific user to run the script with sudo without a password prompt:
+To allow a specific user to run the scripts with sudo without a password prompt:
 
 1. Edit the sudoers file:
    ```bash
    sudo visudo -f /etc/sudoers.d/vw-backup
    ```
 
-2. Add the following line (replace "username" with your actual username):
+2. Add the following lines (replace "username" with your actual username):
    ```
    username ALL=(ALL) NOPASSWD: /etc/scripts/vw-bk-script-primary.sh
+   username ALL=(ALL) NOPASSWD: /etc/scripts/vault-pri-monitor.sh
    ```
 
 ## Backup Storage
@@ -83,228 +168,40 @@ Backups are stored in:
 
 The system maintains the most recent 30 backups and automatically removes older ones.
 
-## Warning
+## System Integration
 
-This script includes functionality to reboot the host system if the Vaultwarden container fails to restart after multiple attempts. Use with caution in production environments.
+This is how the different scripts work together:
 
-===============================================================================================================================================================================
-# Vault Server Heartbeat Monitor (Vault-pri-monitor.sh)
-===============================================================================================================================================================================
+1. **Scheduled Backups**: The `vw-bk-script-primary.sh` performs regular scheduled backups via cron.
 
-## Overview
-The Vault Server Heartbeat Monitor is a robust bash script designed to monitor the availability of a critical server named "vault" through periodic ping checks. If the server becomes unresponsive, the script automatically triggers a backup procedure to ensure data safety.
+2. **Automated Monitoring**: The `vault-pri-monitor.sh` continuously monitors the vault server's availability.
 
-## Features
-- **Periodic Monitoring**: Checks server availability every 4 hours
-- **Thorough Validation**: Performs 10-second ping tests with up to 3 retry attempts per check
-- **Failure Tolerance**: Requires 3 consecutive failed checks (over 12 hours) before declaring the server down
-- **Automatic Recovery**: Executes a predefined backup script when downtime is detected
-- **Comprehensive Logging**: Maintains detailed logs with timestamps and severity levels
-- **Syslog Integration**: Sends alerts to system logs with appropriate priority levels based on severity
+3. **Failure Response**: If the monitor detects that the vault server is down after several consecutive checks, it automatically runs the backup script to preserve data.
 
-## Configuration Parameters
-The script includes several configurable parameters:
+4. **Database Backup Logic**: Both scripts utilize the core `sq-db-backup.sh` to perform the actual SQLite database backup operations.
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `HOSTNAME` | "vault" | The hostname to monitor |
-| `CHECK_INTERVAL` | 14400 (4 hours) | Time between checks in seconds |
-| `PING_DURATION` | 10 | Duration of each ping test in seconds |
-| `MAX_RETRIES` | 3 | Maximum retry attempts per check |
-| `FAILURE_THRESHOLD` | 3 | Number of consecutive failures before running backup |
-| `BACKUP_SCRIPT` | "/etc/scripts/vw-bk-script.sh" | Path to the backup script |
-
-## Installation
-
-1. Save the script to a file (e.g., `/etc/scripts/vault-monitor.sh`)
-2. Make it executable:
-   ```
-   chmod +x /etc/scripts/vault-monitor.sh
-   ```
-3. Set up as a service or add to startup scripts:
-   ```
-   # Example using systemd
-   sudo cp vault-monitor.service /etc/systemd/system/
-   sudo systemctl enable vault-monitor.service
-   sudo systemctl start vault-monitor.service
-   ```
-
-## Logging
-The script creates detailed logs in two locations:
-- **Custom Log File**: `/var/log/vault-monitor.log`
-- **System Logs**: Events are sent to syslog with appropriate severity levels
-
-Log levels include:
-- `INFO`: Normal operational messages
-- `WARNING`: Potential issues like failed ping attempts
-- `ERROR`: Script execution errors
-- `CRITICAL`/`ALERT`: Server down notifications
-
-## Example Log Output
-```
-[2025-03-17 10:00:00] [INFO] Starting vault server heartbeat monitor
-[2025-03-17 10:00:00] [INFO] Checking vault every 4 hours
-[2025-03-17 10:00:05] [INFO] Performing heartbeat check on vault
-[2025-03-17 10:00:15] [INFO] Ping successful on attempt 1
-[2025-03-17 10:00:15] [INFO] Heartbeat check PASSED
-[2025-03-17 10:00:15] [INFO] Next check in 4 hours
-```
-
-## Customization
-You can easily customize the monitoring parameters by editing the variables at the top of the script to match your specific requirements.
-
-## Troubleshooting
-If you encounter issues:
-1. Verify the script has execute permissions
-2. Check if the backup script path is correct and executable
-3. Review logs in `/var/log/vault-monitor.log` for details
-4. Ensure the monitored hostname is correctly configured
-
-## Requirements
-- Bash shell
-- Standard Linux utilities (`ping`, `logger`)
-- Appropriate permissions to write to log files and execute the backup script
-
-===============================================================================================================================================================================
-# Vaultwarden SQLite Database Backup Tool (sq-db-backup.sh)
-===============================================================================================================================================================================
-
-A bash script for automating backups of Vaultwarden SQLite databases.
-
-## Overview
-
-`sq-db-backup.sh` is a utility script designed to create and manage automated backups of a Vaultwarden (self-hosted Bitwarden) SQLite database. This script handles backup rotation, compression, and can be easily integrated with cron for scheduled execution.
-
-## Features
-
-- Creates timestamped SQLite database backups
-- Compresses backups to save storage space
-- Implements backup rotation to manage storage usage
-- Supports optional encryption of backups
-- Includes logging for monitoring backup operations
-- Configurable retention policies
-
-## Prerequisites
-
-- Bash shell environment
-- SQLite3 command-line tools
-- A running Vaultwarden instance with SQLite database
-- (Optional) GPG for backup encryption
-
-## Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/mareox/vaultwarden-tools.git
-   cd vaultwarden-tools
-   ```
-
-2. Make the script executable:
-   ```bash
-   chmod +x sq-db-backup.sh
-   ```
+This integrated approach provides both proactive scheduled backups and reactive backups in response to detected failures.
 
 ## Configuration
 
-Before using the script, edit the configuration variables at the top of the file:
+### Monitor Script Configuration
+
+The monitor script has several configurable parameters at the top of the file:
 
 ```bash
-# Database path
-DB_PATH="/path/to/vaultwarden/db.sqlite3"
-
-# Backup directory
-BACKUP_DIR="/path/to/backup/directory"
-
-# Number of backups to retain
-BACKUP_RETENTION=7
-
-# Logging options
-LOG_FILE="/path/to/backup.log"
-ENABLE_LOGGING=true
+# Configuration
+HOSTNAME="vault"             # Hostname to monitor
+CHECK_INTERVAL=14400         # 4 hours in seconds
+PING_DURATION=10             # Duration to ping in seconds
+MAX_RETRIES=3                # Max retries per check
+FAILURE_THRESHOLD=3          # Number of consecutive failures before marked down
+BACKUP_SCRIPT="/etc/scripts/sq-db-backup.sh"  # Path to backup script
 ```
 
-## Usage
+You may adjust these values to match your specific needs, such as changing the check interval or failure threshold.
 
-### Manual Execution
+## Warnings
 
-Run the script manually:
+- **Reboot Function**: The backup script includes functionality to reboot the host system if the Vaultwarden container fails to restart after multiple attempts. Use with caution in production environments.
 
-```bash
-./sq-db-backup.sh
-```
-
-### Scheduled Backups with Cron
-
-Set up a daily backup schedule using cron:
-
-1. Edit your crontab:
-   ```bash
-   crontab -e
-   ```
-
-2. Add a line to run the backup script daily (e.g., at 2:00 AM):
-   ```
-   0 2 * * * /path/to/sq-db-backup.sh
-   ```
-
-## Backup Files
-
-Backups are created with the following naming convention:
-
-```
-vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3.gz
-```
-
-## Restore Procedure
-
-To restore from a backup:
-
-1. Decompress the backup file:
-   ```bash
-   gunzip vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3.gz
-   ```
-
-2. Stop the Vaultwarden service:
-   ```bash
-   systemctl stop vaultwarden
-   ```
-
-3. Replace the existing database with the backup:
-   ```bash
-   cp vaultwarden-backup-YYYY-MM-DD-HHMMSS.sqlite3 /path/to/vaultwarden/db.sqlite3
-   ```
-
-4. Set proper permissions:
-   ```bash
-   chown vaultwarden:vaultwarden /path/to/vaultwarden/db.sqlite3
-   ```
-
-5. Restart Vaultwarden:
-   ```bash
-   systemctl start vaultwarden
-   ```
-
-## Troubleshooting
-
-- Check the log file for error messages
-- Ensure the script has permission to access the database file
-- Verify the backup directory exists and is writable
-
-## Security Considerations
-
-- Store backups in a secure location
-- Consider enabling backup encryption if sensitive data is stored
-- Regularly test the restore procedure
-
-## License
-
-This project is licensed under the MIT License - see the repository for details.
-
-## Acknowledgments
-
-- Vaultwarden project: https://github.com/dani-garcia/vaultwarden
-- Contributors to the vaultwarden-tools repository
-
-## Support
-
-For issues, questions, or contributions, please open an issue on the [GitHub repository](https://github.com/mareox/vaultwarden-tools).
+- **Resource Usage**: The monitor script runs continuously and performs periodic ping checks. While the resource usage is minimal, be aware that it's constantly running on your system.
