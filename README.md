@@ -1,4 +1,6 @@
+===============================================================================================================================================================================
 # Vaultwarden Backup System (vw-bk-script.sh)
+===============================================================================================================================================================================
 
 This system provides automated backup functionality for a Vaultwarden Docker container and its SQLite database.
 
@@ -85,7 +87,9 @@ The system maintains the most recent 30 backups and automatically removes older 
 
 This script includes functionality to reboot the host system if the Vaultwarden container fails to restart after multiple attempts. Use with caution in production environments.
 
-# Vault-pri-monitor.sh
+===============================================================================================================================================================================
+# Vault Server Heartbeat Monitor (Vault-pri-monitor.sh)
+===============================================================================================================================================================================
 
 ## Overview
 The Vault Server Heartbeat Monitor is a robust bash script designed to monitor the availability of a critical server named "vault" through periodic ping checks. If the server becomes unresponsive, the script automatically triggers a backup procedure to ensure data safety.
@@ -108,7 +112,7 @@ The script includes several configurable parameters:
 | `PING_DURATION` | 10 | Duration of each ping test in seconds |
 | `MAX_RETRIES` | 3 | Maximum retry attempts per check |
 | `FAILURE_THRESHOLD` | 3 | Number of consecutive failures before running backup |
-| `BACKUP_SCRIPT` | "/etc/scripts/sq-db-backup.sh" | Path to the backup script |
+| `BACKUP_SCRIPT` | "/etc/scripts/vw-bk-script.sh" | Path to the backup script |
 
 ## Installation
 
@@ -161,7 +165,9 @@ If you encounter issues:
 - Standard Linux utilities (`ping`, `logger`)
 - Appropriate permissions to write to log files and execute the backup script
 
+===============================================================================================================================================================================
 # Vaultwarden SQLite Database Backup Tool (sq-db-backup.sh)
+===============================================================================================================================================================================
 
 A bash script for automating backups of Vaultwarden SQLite databases.
 
