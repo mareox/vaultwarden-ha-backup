@@ -96,7 +96,9 @@ The system consists of the following scripts:
 
 ### Automated Setup (Recommended)
 
-The easiest way to install the system is to use the provided setup script:
+#### Local Installation
+
+If you have downloaded all the files:
 
 1. Download all the scripts to a temporary location:
    ```bash
@@ -108,6 +110,19 @@ The easiest way to install the system is to use the provided setup script:
    ```bash
    sudo ./setup.sh
    ```
+
+#### Remote Installation (One-line Command)
+
+To perform a remote installation without manually downloading the files first:
+
+```bash
+sudo bash <(curl -s https://raw.githubusercontent.com/mareox/vaultwarden-ha-backup/refs/heads/main/setup.sh) install
+```
+
+This command will:
+- Download the setup script
+- Download all necessary component scripts
+- Install and configure the system
 
 3. Follow the interactive prompts to choose between:
    - **PRIMARY server**: Configured with scheduled backups at 3:00 AM and 5:00 PM daily.
