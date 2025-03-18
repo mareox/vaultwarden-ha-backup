@@ -1,3 +1,28 @@
+#!/bin/bash
+#
+# vaultwarden-setup.sh - Interactive setup script for Vaultwarden management system
+#
+
+# Colors for better output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Define script paths
+SCRIPTS_DIR="/etc/scripts"
+PRIMARY_SCRIPT="${SCRIPTS_DIR}/vw-bk-script-primary.sh"
+BACKUP_SCRIPT="${SCRIPTS_DIR}/sq-db-backup.sh"
+MONITOR_SCRIPT="${SCRIPTS_DIR}/vault-pri-monitor.sh"
+SYSTEMD_SERVICE="/etc/systemd/system/vault-monitor.service"
+
+# Log file
+LOG_FILE="$HOME/vaultwarden-setup.log"
+
+# Remote installation mode flag
+REMOTE_INSTALL=false
+
 # Function to download scripts for remote installation
 download_scripts() {
     local base_url="https://raw.githubusercontent.com/mareox/vaultwarden-ha-backup/refs/heads/main"
@@ -22,30 +47,7 @@ download_scripts() {
     
     log "Scripts downloaded successfully to $temp_dir" "SUCCESS"
     return 0
-}#!/bin/bash
-#
-# vaultwarden-setup.sh - Interactive setup script for Vaultwarden management system
-#
-
-# Colors for better output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Define script paths
-SCRIPTS_DIR="/etc/scripts"
-PRIMARY_SCRIPT="${SCRIPTS_DIR}/vw-bk-script-primary.sh"
-BACKUP_SCRIPT="${SCRIPTS_DIR}/sq-db-backup.sh"
-MONITOR_SCRIPT="${SCRIPTS_DIR}/vault-pri-monitor.sh"
-SYSTEMD_SERVICE="/etc/systemd/system/vault-monitor.service"
-
-# Log file
-LOG_FILE="$HOME/vaultwarden-setup.log"
-
-# Remote installation mode flag
-REMOTE_INSTALL=false
+}
 
 # Function for logging
 log() {
