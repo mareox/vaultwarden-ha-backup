@@ -1,4 +1,89 @@
+# Vaultwarden Backup System
 
+This system provides automated backup functionality for a Vaultwarden Docker container and its SQLite database.
+
+## Components
+
+The backup system consists of two main scripts:
+
+1. **vw-bk-script-primary.sh**: Main controller script that:
+   - Stops the Vaultwarden Docker container
+   - Executes the database backup script
+   - Restarts the container
+   - Handles errors and container restart failures
+   - Reboots the host system if container restart fails repeatedly
+
+2. **sq-db-backup.sh**: Database backup script that:
+   - Creates backups of the SQLite database
+   - Maintains a rotating set of backups (keeping the most recent 30)
+   - Cleans up older backups automatically
+
+## Installation
+
+1. Place both scripts in the `/etc/scripts/` directory:
+   ```bash
+   sudo cp vw-bk-script-primary.sh /etc/scripts/
+   sudo cp sq-db-backup.sh /etc/scripts/
+   ```
+
+2. Set proper permissions:
+   ```bash
+   sudo chmod 700 /etc/scripts/vw-bk-script-primary.sh
+   sudo chmod 700 /etc/scripts/sq-db-backup.sh
+   ```
+
+## Execution
+
+The script can be run manually:
+```bash
+sudo /etc/scripts/vw-bk-script-primary.sh
+```
+
+For scheduled execution, add it to root's crontab:
+```bash
+sudo crontab -e
+```
+
+Add a line like this to run it daily at 2 AM:
+```
+0 2 * * * /etc/scripts/vw-bk-script-primary.sh
+```
+
+## Logs
+
+Logs are saved to:
+```
+/etc/scripts/sq-db-backup.sh.log
+```
+
+Review this file to check for backup successes or failures.
+
+## Sudoers Configuration (Optional)
+
+To allow a specific user to run the script with sudo without a password prompt:
+
+1. Edit the sudoers file:
+   ```bash
+   sudo visudo -f /etc/sudoers.d/vw-backup
+   ```
+
+2. Add the following line (replace "username" with your actual username):
+   ```
+   username ALL=(ALL) NOPASSWD: /etc/scripts/vw-bk-script-primary.sh
+   ```
+
+## Backup Storage
+
+Backups are stored in:
+```
+/mx-server/backups/BK_vaultwarden/
+```
+
+The system maintains the most recent 30 backups and automatically removes older ones.
+
+## Warning
+
+This script includes functionality to reboot the host system if the Vaultwarden container fails to restart after multiple attempts. Use with caution in production environments.
 
 # Vault-pri-monitor.sh
 
