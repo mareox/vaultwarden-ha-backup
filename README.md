@@ -1,10 +1,72 @@
-# Vaultwarden Management System
+## High Availability Setup
 
-This system provides automated backup and monitoring functionality for a Vaultwarden Docker container and its SQLite database.
+The Keepalived setup provides high availability for your Vaultwarden instance through the following mechanism:
+
+1. Two servers are configured: one as MASTER (priority 100) and one as BACKUP (priority 150).
+2. Both servers run the Vaultwarden container independently.
+3. A virtual IP address is shared between them, which automatically moves to the active server.
+4. If the MASTER server fails, the BACKUP server takes over the virtual IP address.
+5. Clients connect to the virtual IP address, so the failover is transparent to them.
+
+### Prerequisites for High Availability
+
+1. Two servers with Vaultwarden installed.
+2. Network infrastructure that allows for a shared virtual IP.
+3. Both servers must be able to communicate with each other.
+
+### Keepalived Configuration
+
+The `keepalived-setup.sh` script automates the configuration of Keepalived with:
+
+- Health check script to monitor the local system
+- Notification script for state transitions
+- Virtual IP configuration
+- Authentication between nodes
+
+### Testing Failover
+
+To test that high availability is working properly:
+
+1. Verify that the virtual IP is active on the MASTER node:
+   ```bash
+   ip addr show
+   ```
+
+2. Simulate a failure by stopping Keepalived on the MASTER node:
+   ```bash
+   sudo systemctl stop keepalived
+   ```
+
+3. Verify that the virtual IP has moved to the BACKUP node:
+   ```bash
+   # On the BACKUP node
+   ip addr show
+   ```
+
+4. Restart Keepalived on the MASTER node:
+   ```bash
+   sudo systemctl start keepalived
+   ```
+
+5. Verify that the virtual IP moves back to the MASTER node (after a brief delay).## System Architecture
+
+The Vaultwarden Management System can be deployed in different configurations:
+
+### Single Server Deployment
+- A single server running Vaultwarden with backup and monitoring capabilities.
+
+### High Availability Deployment
+- **PRIMARY Server**: Runs Vaultwarden with scheduled backups and monitoring.
+- **BACKUP Server**: Standby server that takes over if the PRIMARY fails.
+- **Virtual IP**: Floating IP address that automatically follows the active server.
+
+With the high availability setup, if the PRIMARY server fails, the BACKUP server automatically takes over the Virtual IP and continues to serve the Vaultwarden application with minimal downtime.# Vaultwarden Management System
+
+This system provides automated backup, monitoring, and high availability functionality for a Vaultwarden Docker container and its SQLite database.
 
 ## Components
 
-The system consists of three main scripts:
+The system consists of the following scripts:
 
 1. **vw-bk-script-primary.sh**: Main backup controller script that:
    - Stops the Vaultwarden Docker container
@@ -23,6 +85,12 @@ The system consists of three main scripts:
    - Logs the status of the checks
    - Triggers the backup script after consecutive failures
    - Provides syslog integration for alerting
+
+4. **keepalived-setup.sh**: High availability setup script that:
+   - Configures Keepalived for automatic failover between PRIMARY and BACKUP servers
+   - Sets up virtual IP functionality
+   - Creates health check and notification scripts
+   - Provides a simple way to create a highly available Vaultwarden deployment
 
 ## Installation
 
@@ -45,6 +113,11 @@ The easiest way to install the system is to use the provided setup script:
    - **PRIMARY server**: Configured with scheduled backups at 3:00 AM and 5:00 PM daily.
    - **SECONDARY server**: No scheduled backups, only monitor-triggered backups.
 
+4. The script will also ask if you want to configure Keepalived for high availability:
+   - If you select yes, it will run the Keepalived setup script
+   - You'll be prompted to choose MASTER or BACKUP role
+   - You'll need to provide the local IP, peer IP, virtual IP, and authentication password
+
 The setup script will:
 - Verify Docker and the Vaultwarden container are installed
 - Install all scripts to `/etc/scripts/`
@@ -52,6 +125,7 @@ The setup script will:
 - Configure cron jobs (for PRIMARY servers)
 - Set up and start the monitor service
 - Create required directories
+- Optionally set up Keepalived for high availability
 - Provide a summary of the installation
 
 ### Manual Installation
@@ -63,6 +137,7 @@ If you prefer to install manually, follow these steps:
    sudo cp vw-bk-script-primary.sh /etc/scripts/
    sudo cp sq-db-backup.sh /etc/scripts/
    sudo cp vault-pri-monitor.sh /etc/scripts/
+   sudo cp keepalived-setup.sh /etc/scripts/  # Optional for high availability
    ```
 
 2. Set proper permissions:
@@ -70,6 +145,7 @@ If you prefer to install manually, follow these steps:
    sudo chmod 700 /etc/scripts/vw-bk-script-primary.sh
    sudo chmod 700 /etc/scripts/sq-db-backup.sh
    sudo chmod 700 /etc/scripts/vault-pri-monitor.sh
+   sudo chmod 700 /etc/scripts/keepalived-setup.sh  # Optional for high availability
    ```
 
 3. Create the backup directory:
@@ -90,6 +166,12 @@ If you prefer to install manually, follow these steps:
    sudo systemctl daemon-reload
    sudo systemctl enable vault-monitor
    sudo systemctl start vault-monitor
+   ```
+
+6. (Optional) Set up Keepalived for high availability:
+   ```bash
+   sudo /etc/scripts/keepalived-setup.sh
+   # Follow the prompts to configure Keepalived
    ```
 
 ## Execution
@@ -126,6 +208,33 @@ sudo systemctl restart vault-monitor
 sudo journalctl -u vault-monitor
 ```
 
+### Keepalived (High Availability)
+
+If you've set up Keepalived for high availability, you can manage it with:
+
+```bash
+# Check status
+sudo systemctl status keepalived
+
+# Stop service
+sudo systemctl stop keepalived
+
+# Start service
+sudo systemctl start keepalived
+
+# Restart service
+sudo systemctl restart keepalived
+
+# View logs
+sudo journalctl -u keepalived
+```
+
+To check which node is currently the MASTER (active node):
+```bash
+ip addr show
+```
+Look for the virtual IP address in the output.
+
 ## Logs
 
 ### Backup Logs
@@ -142,7 +251,13 @@ Monitor logs are saved to:
 
 Additionally, the monitoring script sends log messages to syslog with different priority levels based on the severity of events.
 
-Review these files to check for backup successes or failures and monitor status.
+### Keepalived Logs
+Keepalived logs are sent to the system journal:
+```
+sudo journalctl -u keepalived
+```
+
+Review these files to check for backup successes or failures, monitor status, and Keepalived state changes.
 
 ## Sudoers Configuration (Optional)
 
@@ -172,15 +287,21 @@ The system maintains the most recent 30 backups and automatically removes older 
 
 This is how the different scripts work together:
 
-1. **Scheduled Backups**: The `vw-bk-script-primary.sh` performs regular scheduled backups via cron.
+1. **Scheduled Backups**: The `vw-bk-script-primary.sh` performs regular scheduled backups via cron on the PRIMARY server.
 
-2. **Automated Monitoring**: The `vault-pri-monitor.sh` continuously monitors the vault server's availability.
+2. **Automated Monitoring**: The `vault-pri-monitor.sh` continuously monitors the vault server's availability on both PRIMARY and SECONDARY servers.
 
 3. **Failure Response**: If the monitor detects that the vault server is down after several consecutive checks, it automatically runs the backup script to preserve data.
 
 4. **Database Backup Logic**: Both scripts utilize the core `sq-db-backup.sh` to perform the actual SQLite database backup operations.
 
-This integrated approach provides both proactive scheduled backups and reactive backups in response to detected failures.
+5. **High Availability**: The `keepalived` service manages the virtual IP address, automatically moving it to the healthy server if the active one fails.
+
+This integrated approach provides:
+- Proactive scheduled backups
+- Reactive backups in response to detected failures
+- Automatic failover between servers
+- Minimized downtime for end users
 
 ## Configuration
 
