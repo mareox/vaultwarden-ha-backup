@@ -6,7 +6,7 @@ BACKUP_NAME="db-$(date '+%Y%m%d-%H%M').sqlite3"
 DB_FILE="/vw-data/db.sqlite3"
 MAX_BACKUPS=30
 
-# Create the backup directory if it doesn't exist
+# Create the backup directory if it doesn't exist - test123
 mkdir -p "$BACKUP_DIR"
 
 # Run the backup command
